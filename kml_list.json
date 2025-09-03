@@ -1,3 +1,4 @@
-[
-  "https://raw.githubusercontent.com/ecky16/Fiber_Length_authenticator/main/ODC_20250702.kml",
-]
+const KML_FILES = [
+  "ODP_20250702.kml",
+  "ODC_20250714.kml"
+];

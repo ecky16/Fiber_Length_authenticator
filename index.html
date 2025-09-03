@@ -103,6 +103,20 @@
     btnFit.addEventListener('click', () => { if (layerAB) map.fitBounds(layerAB.getBounds(), { padding: [30,30] }); });
     selA.addEventListener('change', drawAB);
     selB.addEventListener('change', drawAB);
+<script>
+// pastikan toGeoJSON ada
+(async () => {
+  if (!window.toGeoJSON) {
+    await new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://unpkg.com/togeojson@0.16.0/dist/togeojson.umd.js';
+      s.onload = resolve;
+      s.onerror = () => reject(new Error('Gagal load togeojson'));
+      document.head.appendChild(s);
+    });
+  }
+})();
+</script>
 
     // ===== Bootstrap: load multiple KML =====
     (async function bootstrap(){

@@ -123,7 +123,8 @@ const map = L.map('map').setView([-7.63, 112.88], 13);
         for (let i = 0; i < list.length; i++) {
           const f = String(list[i]);
           try {
-            const r = await fetch(f, { cache: 'no-store' });
+            const url = encodeURI(f);
+            const r = await fetch(url, { cache: 'no-store' });
             if (!r.ok) throw new Error('HTTP '+r.status);
             const t = await r.text();
             loadKmlAppend(t, i);
@@ -144,7 +145,8 @@ const map = L.map('map').setView([-7.63, 112.88], 13);
     for (let i = 0; i < files.length; i++) {
       const f = files[i];
       try {
-        const res = await fetch(f, { cache: 'no-store' });
+        const url = encodeURI(f);
+      const res = await fetch(url, { cache: 'no-store' });
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const text = await res.text();
         loadKmlAppend(text, i);
@@ -173,19 +175,31 @@ const map = L.map('map').setView([-7.63, 112.88], 13);
   const kml = parser.parseFromString(kmlText, 'text/xml');
   const geojson = toGeoJSON.kml(kml);
 
-  // kumpulkan point & gabungkan LineString (urut sesuai KML_FILES)
-  geojson.features.forEach(f => {
+  // Debug info: berapa banyak fitur yang berhasil diparse
+  console.log("PARSE OK:", { index, features: geojson.features?.length || 0 });
+
+  // Loop semua fitur yang punya geometry
+  (geojson.features || []).forEach(f => {
+    if (!f.geometry || !f.geometry.type) return;
+
     if (f.geometry.type === 'Point') {
       const lat = f.geometry.coordinates[1];
       const lng = f.geometry.coordinates[0];
-      const name = f.properties.name || `${lat.toFixed(5)},${lng.toFixed(5)}`;
+      const name = f.properties?.name || `${lat.toFixed(5)},${lng.toFixed(5)}`;
       points.push({ name, lat, lng });
       L.marker([lat,lng]).addTo(map).bindPopup(name);
     }
+
     if (f.geometry.type === 'LineString') {
       const coords = f.geometry.coordinates.map(c => [c[1], c[0]]);
-      // Catatan: kita concatenation berurutan sesuai file; pastikan file diurutkan sesuai trase.
       lineCoords = lineCoords.concat(coords);
+    }
+
+    if (f.geometry.type === 'MultiLineString') {
+      f.geometry.coordinates.forEach(seg => {
+        const coords = seg.map(c => [c[1], c[0]]);
+        lineCoords = lineCoords.concat(coords);
+      });
     }
   });
 }
@@ -289,3 +303,4 @@ function finalizeAfterLoad(){
   </script>
 </body>
 </html>
+

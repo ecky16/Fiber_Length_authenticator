@@ -55,7 +55,8 @@
         <div><b>Panjang A→B:</b> <span id="lenAB">0</span> m</div>
         <div><b>Jarak putus:</b> <span id="lenFault">0</span> m</div>
       </div>
-      <div class="muted">• Bisa load beberapa file KML sekaligus (<code>data1.kml</code>, <code>data2.kml</code>, dst).<br/>• Semua titik dan jalur digabung jadi satu peta.</div>
+      <div class="muted">• Bisa load beberapa file KML sekaligus (<code>kml_list.json</code>), atau fallback <code>KML_FILES</code> / <code>data.kml</code>.<br/>• Semua titik dan jalur digabung jadi satu peta.</div>
+      <div class="muted" id="statusUI" style="white-space:pre-wrap; background:#f1f5f9; border:1px solid #e2e8f0; padding:8px; border-radius:8px;"></div>
     </div>
   </div>
 
@@ -66,15 +67,15 @@
   <script src="https://unpkg.com/togeojson@0.16.0/dist/togeojson.umd.js" crossorigin=""></script>
 
   <script>
-    // ===== Map init =====
-    // ====== CONFIG: daftar file KML di repo (urutannya menentukan urutan penggabungan)
-// Tambah/ubah sesuai kebutuhan. Jika kosong, script akan mencoba pakai <script#kmlData>.
-const KML_FILES = [
-  'data1.kml',
-  'data2.kml'
-];
+    // ====== CONFIG ======
+    const KML_FILES = [
+      // contoh fallback manual (kalau tidak pakai kml_list.json)
+      // 'ODC_20250714.kml',
+      // 'ODP_20250702.kml'
+    ];
 
-const map = L.map('map').setView([-7.63, 112.88], 13);
+    // ===== Map init =====
+    const map = L.map('map').setView([-7.63, 112.88], 13);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 20, attribution: '&copy; OpenStreetMap' }).addTo(map);
 
     // ===== State =====
@@ -96,6 +97,7 @@ const map = L.map('map').setView([-7.63, 112.88], 13);
     const statsBox = document.getElementById('statsBox');
     const lenAB = document.getElementById('lenAB');
     const lenFault = document.getElementById('lenFault');
+    const statusUI = document.getElementById('statusUI');
 
     btnLocate.addEventListener('click', locateFault);
     btnFit.addEventListener('click', () => { if (layerAB) map.fitBounds(layerAB.getBounds(), { padding: [30,30] }); });
@@ -104,133 +106,146 @@ const map = L.map('map').setView([-7.63, 112.88], 13);
 
     // ===== Bootstrap: load multiple KML =====
     (async function bootstrap(){
-  const embeddedRaw = (document.getElementById('kmlData')?.textContent || '').trim();
+      const embeddedRaw = (document.getElementById('kmlData')?.textContent || '').trim();
 
-  // 1) Prioritas: embedded KML di <script#kmlData>
-  if (embeddedRaw) {
-    loadKmlAppend(embeddedRaw, 0);
-    finalizeAfterLoad();
-    return;
-  }
+      // 1) Prioritas: embedded KML di <script#kmlData>
+      if (embeddedRaw) {
+        loadKmlAppend(embeddedRaw, 0);
+        finalizeAfterLoad();
+        return;
+      }
 
-  // 2) Coba baca daftar file dari kml_list.json (opsi tanpa ganti string di HTML)
-  try {
-    const resList = await fetch('kml_list.json', { cache: 'no-store' });
-    if (resList.ok) {
-      const list = await resList.json();
-      if (Array.isArray(list) && list.length) {
+      // 2) Coba baca daftar file dari kml_list.json
+      try {
+        const resList = await fetch('kml_list.json?v=' + Date.now(), { cache: 'no-store' });
+        if (resList.ok) {
+          const list = await resList.json();
+          if (Array.isArray(list) && list.length) {
+            let loaded = 0;
+            for (let i = 0; i < list.length; i++) {
+              const f = String(list[i]);
+              try {
+                const url = encodeURI(f);
+                const r = await fetch(url + '?v=' + Date.now(), { cache: 'no-store' });
+                if (!r.ok) throw new Error('HTTP '+r.status);
+                const t = await r.text();
+                statusUI.textContent += `
+LOAD OK: ${url} (len ${t.length})`;
+                loadKmlAppend(t, i);
+                loaded++;
+              } catch (e) {
+                console.warn('Gagal baca', f, e);
+                statusUI.textContent += `
+Gagal load: ${f} → ${e}`;
+              }
+            }
+            if (loaded > 0) { finalizeAfterLoad(); return; }
+          }
+        } else {
+          statusUI.textContent += `
+Tidak bisa akses kml_list.json (HTTP ${resList.status})`;
+        }
+      } catch (e) {
+        console.warn('kml_list.json tidak tersedia / gagal diproses', e);
+        statusUI.textContent += `
+Tidak bisa membaca kml_list.json: ${e}`;
+      }
+
+      // 3) Fallback: daftar manual KML_FILES (kalau diset di atas)
+      const files = Array.isArray(KML_FILES) ? KML_FILES : [];
+      if (files.length) {
         let loaded = 0;
-        for (let i = 0; i < list.length; i++) {
-          const f = String(list[i]);
+        for (let i = 0; i < files.length; i++) {
+          const f = files[i];
           try {
             const url = encodeURI(f);
-            const r = await fetch(url, { cache: 'no-store' });
-            if (!r.ok) throw new Error('HTTP '+r.status);
-            const t = await r.text();
-            loadKmlAppend(t, i);
+            const res = await fetch(url + '?v=' + Date.now(), { cache: 'no-store' });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const text = await res.text();
+            statusUI.textContent += `
+LOAD OK (fallback): ${url} (len ${text.length})`;
+            loadKmlAppend(text, i);
             loaded++;
-          } catch (e) { console.warn('Gagal baca', f, e); }
+          } catch (e) {
+            console.warn('Gagal baca', f, e);
+            statusUI.textContent += `
+Gagal load (fallback): ${f} → ${e}`;
+          }
         }
         if (loaded > 0) { finalizeAfterLoad(); return; }
       }
-    }
-  } catch (e) {
-    console.warn('kml_list.json tidak tersedia / gagal diproses', e);
-  }
 
-  // 3) Fallback: daftar manual KML_FILES (kalau diset di atas)
-  const files = Array.isArray(KML_FILES) ? KML_FILES : [];
-  if (files.length) {
-    let loaded = 0;
-    for (let i = 0; i < files.length; i++) {
-      const f = files[i];
+      // 4) Fallback terakhir: coba data.kml
       try {
-        const url = encodeURI(f);
-      const res = await fetch(url, { cache: 'no-store' });
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        const text = await res.text();
-        loadKmlAppend(text, i);
-        loaded++;
-      } catch (e) { console.warn('Gagal baca', f, e); }
-    }
-    if (loaded > 0) { finalizeAfterLoad(); return; }
-  }
+        const res = await fetch('data.kml?v=' + Date.now(), { cache: 'no-store' });
+        if (res.ok) {
+          const text = await res.text();
+          statusUI.textContent += `
+LOAD OK: data.kml (len ${text.length})`;
+          loadKmlAppend(text, 0);
+          finalizeAfterLoad();
+          return;
+        }
+      } catch {}
 
-  // 4) Fallback terakhir: coba data.kml
-  try {
-    const res = await fetch('data.kml', { cache: 'no-store' });
-    if (res.ok) {
-      const text = await res.text();
-      loadKmlAppend(text, 0);
-      finalizeAfterLoad();
-      return;
-    }
-  } catch {}
-
-  console.warn('Tidak ada sumber KML: embed kosong, kml_list.json tidak ada/invalid, KML_FILES kosong, dan data.kml tidak ditemukan.');
-})();
+      console.warn('Tidak ada sumber KML.');
+      statusUI.textContent += `
+Tidak ada sumber KML: embed kosong, kml_list.json tidak ada/invalid, KML_FILES kosong, dan data.kml tidak ditemukan.`;
+    })();
 
     function loadKmlAppend(kmlText, index){
-  const parser = new DOMParser();
-  const kml = parser.parseFromString(kmlText, 'text/xml');
-  const geojson = toGeoJSON.kml(kml);
+      const parser = new DOMParser();
+      const kml = parser.parseFromString(kmlText, 'text/xml');
+      const geojson = toGeoJSON.kml(kml);
 
-  // Debug info: berapa banyak fitur yang berhasil diparse
-  console.log("PARSE OK:", { index, features: geojson.features?.length || 0 });
+      // Debug info
+      console.log('PARSE OK:', { index, features: geojson.features?.length || 0 });
+      statusUI.textContent += `
+PARSE OK #${index}: ${geojson.features?.length || 0} fitur.`;
 
-  // Loop semua fitur yang punya geometry
-  (geojson.features || []).forEach(f => {
-    if (!f.geometry || !f.geometry.type) return;
+      // Loop semua fitur yang punya geometry
+      (geojson.features || []).forEach(f => {
+        if (!f.geometry || !f.geometry.type) return;
 
-    if (f.geometry.type === 'Point') {
-      const lat = f.geometry.coordinates[1];
-      const lng = f.geometry.coordinates[0];
-      const name = f.properties?.name || `${lat.toFixed(5)},${lng.toFixed(5)}`;
-      points.push({ name, lat, lng });
-      L.marker([lat,lng]).addTo(map).bindPopup(name);
-    }
-
-    if (f.geometry.type === 'LineString') {
-      const coords = f.geometry.coordinates.map(c => [c[1], c[0]]);
-      lineCoords = lineCoords.concat(coords);
-    }
-
-    if (f.geometry.type === 'MultiLineString') {
-      f.geometry.coordinates.forEach(seg => {
-        const coords = seg.map(c => [c[1], c[0]]);
-        lineCoords = lineCoords.concat(coords);
-      });
-    }
-  });
-}
-
-function finalizeAfterLoad(){
-  // isi dropdown
-  selA.innerHTML=''; selB.innerHTML='';
-  points.forEach(p => {
-    const optA = document.createElement('option'); optA.value = `${p.lat},${p.lng}`; optA.text = p.name; selA.appendChild(optA);
-    const optB = document.createElement('option'); optB.value = `${p.lat},${p.lng}`; optB.text = p.name; selB.appendChild(optB);
-  });
-
-  if (lineCoords.length) {
-    if (layerMainLine) map.removeLayer(layerMainLine);
-    layerMainLine = L.polyline(lineCoords, { color: 'blue', weight: 4 }).addTo(map);
-    map.fitBounds(layerMainLine.getBounds(), { padding: [30,30] });
-  }
-
-  if (selA.options.length) selA.selectedIndex = 0;
-  if (selB.options.length) selB.selectedIndex = Math.max(0, selB.options.length - 1);
-  drawAB();
-},${lng.toFixed(5)}`, lat, lng });
-          L.marker([lat,lng]).addTo(map).bindPopup(f.properties.name || 'Point');
-          const optA = document.createElement('option'); optA.value = `${lat},${lng}`; optA.text = f.properties.name || `${lat.toFixed(5)}, ${lng.toFixed(5)}`; selA.appendChild(optA);
-          const optB = document.createElement('option'); optB.value = `${lat},${lng}`; optB.text = f.properties.name || `${lat.toFixed(5)}, ${lng.toFixed(5)}`; selB.appendChild(optB);
+        if (f.geometry.type === 'Point') {
+          const lat = f.geometry.coordinates[1];
+          const lng = f.geometry.coordinates[0];
+          const name = f.properties?.name || `${lat.toFixed(5)},${lng.toFixed(5)}`;
+          points.push({ name, lat, lng });
+          L.marker([lat,lng]).addTo(map).bindPopup(name);
         }
+
         if (f.geometry.type === 'LineString') {
           const coords = f.geometry.coordinates.map(c => [c[1], c[0]]);
           lineCoords = lineCoords.concat(coords);
         }
+
+        if (f.geometry.type === 'MultiLineString') {
+          f.geometry.coordinates.forEach(seg => {
+            const coords = seg.map(c => [c[1], c[0]]);
+            lineCoords = lineCoords.concat(coords);
+          });
+        }
       });
+    }
+
+    function finalizeAfterLoad(){
+      // isi dropdown
+      selA.innerHTML=''; selB.innerHTML='';
+      points.forEach(p => {
+        const optA = document.createElement('option'); optA.value = `${p.lat},${p.lng}`; optA.text = p.name; selA.appendChild(optA);
+        const optB = document.createElement('option'); optB.value = `${p.lat},${p.lng}`; optB.text = p.name; selB.appendChild(optB);
+      });
+
+      if (lineCoords.length) {
+        if (layerMainLine) map.removeLayer(layerMainLine);
+        layerMainLine = L.polyline(lineCoords, { color: 'blue', weight: 4 }).addTo(map);
+        map.fitBounds(layerMainLine.getBounds(), { padding: [30,30] });
+      }
+
+      if (selA.options.length) selA.selectedIndex = 0;
+      if (selB.options.length) selB.selectedIndex = Math.max(0, selB.options.length - 1);
+      drawAB();
     }
 
     function drawAB(){

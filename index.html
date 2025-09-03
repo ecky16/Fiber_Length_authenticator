@@ -3,189 +3,290 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Fiber Optic Fault Locator — Single File</title>
+  <title>Fiber Optic Fault Locator — Multi KML A→B</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <style>
     html, body { height: 100%; margin: 0; }
     #map { height: 100vh; }
-    .input-panel {
+    .panel {
       position: absolute; top: 10px; left: 10px; z-index: 1000;
-      background: #fff; padding: 12px; border-radius: 10px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+      background: #fff; padding: 12px; border-radius: 12px;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.18);
       font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-      font-size: 14px; width: 280px; max-width: 85vw;
+      font-size: 14px; width: 320px; max-width: 90vw;
     }
-    .input-panel h3 { margin: 0 0 8px; font-size: 16px; }
-    .row { margin: 6px 0; display: grid; grid-template-columns: 1fr; gap: 6px; }
+    .panel h3 { margin: 0 0 8px; font-size: 16px; }
+    .row { margin: 8px 0; display: grid; grid-template-columns: 1fr; gap: 6px; }
     .row label { font-weight: 600; }
-    .row input, .row select { padding: 6px 8px; border-radius: 6px; border: 1px solid #ddd; }
-    .row button { padding: 8px 10px; border: none; border-radius: 8px; cursor: pointer; background:#2563eb; color: #fff; font-weight: 600; }
-    .hint { font-size: 12px; color: #444; line-height: 1.4; }
+    .row input, .row select { padding: 8px 10px; border-radius: 8px; border: 1px solid #e5e7eb; }
+    .btn { padding: 10px 12px; border: none; border-radius: 10px; cursor: pointer; background:#2563eb; color: #fff; font-weight: 700; }
+    .btn.secondary { background:#0ea5e9; }
+    .muted { font-size: 12px; color: #555; }
     .badge { display:inline-block; padding:2px 6px; border:1px solid #ddd; border-radius:999px; font-size:11px; color:#555; }
+    .stats { font-size: 12px; color:#111; background:#f8fafc; border:1px solid #e5e7eb; border-radius:8px; padding:8px; }
+    .flex { display:flex; gap:6px; align-items:center; }
   </style>
 </head>
 <body>
-  <div class="input-panel">
-    <h3>Fiber Optic Fault Locator <span class="badge">Single‑File</span></h3>
+  <div class="panel">
+    <h3>Fiber Optic Fault Locator <span class="badge">Multi‑KML A→B</span></h3>
+
     <div class="row">
-      <label>Mulai dari Titik A (opsional)</label>
+      <label>Pilih Titik A (awal jalur)</label>
       <select id="pointA"></select>
     </div>
+
+    <div class="row">
+      <label>Pilih Titik B (akhir jalur)</label>
+      <select id="pointB"></select>
+    </div>
+
     <div class="row">
       <label>Jarak putus dari A (meter)</label>
       <input type="number" id="faultDistance" placeholder="misal: 1200" />
-      <button id="btnLocate">Cari Titik Putus</button>
-    </div>
-    <div class="row">
-      <div class="hint">
-        • File ini bisa langsung jalan di GitHub Pages.<br/>
-        • Kamu bisa <b>sematkan KML</b> di bawah (script#kmlData) atau <b>taruh data.kml</b> di repo yang sama — otomatis terbaca.
+      <div class="flex">
+        <button class="btn" id="btnLocate">Cari Titik Putus</button>
+        <button class="btn secondary" id="btnFit">Zoom ke A→B</button>
       </div>
     </div>
+
+    <div class="row">
+      <div class="stats" id="statsBox" hidden>
+        <div><b>Panjang A→B:</b> <span id="lenAB">0</span> m</div>
+        <div><b>Jarak putus:</b> <span id="lenFault">0</span> m</div>
+      </div>
+      <div class="muted">• Bisa load beberapa file KML sekaligus (<code>data1.kml</code>, <code>data2.kml</code>, dst).<br/>• Semua titik dan jalur digabung jadi satu peta.</div>
+    </div>
   </div>
+
   <div id="map"></div>
 
-  <!-- Leaflet & toGeoJSON -->
+  <!-- Libs -->
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
   <script src="https://unpkg.com/togeojson@0.16.0"></script>
 
-  <!-- =====================
-       Opsi 1: KML Embedded
-       ---------------------
-       Paste isi file KML kamu di antara tag di bawah ini.
-       Kalau dibiarkan kosong, script akan otomatis mencoba memuat 'data.kml' via fetch().
-       ====================== -->
-  <script id="kmlData" type="application/xml">
-  <!--
-  <?xml version="1.0" encoding="UTF-8"?>
-  <kml xmlns="http://www.opengis.net/kml/2.2">
-    <Document>
-      <Placemark><name>Node A</name><Point><coordinates>112.8800,-7.6300,0</coordinates></Point></Placemark>
-      <Placemark><name>Node B</name><Point><coordinates>112.9000,-7.6400,0</coordinates></Point></Placemark>
-      <Placemark><name>FO Trunk</name>
-        <LineString><coordinates>
-          112.8800,-7.6300,0 112.8850,-7.6320,0 112.8900,-7.6350,0 112.9000,-7.6400,0
-        </coordinates></LineString>
-      </Placemark>
-    </Document>
-  </kml>
-  -->
-  </script>
-
   <script>
-    // --- Map init
-    const map = L.map('map').setView([-7.63, 112.88], 13);
+    // ===== Map init =====
+    // ====== CONFIG: daftar file KML di repo (urutannya menentukan urutan penggabungan)
+// Tambah/ubah sesuai kebutuhan. Jika kosong, script akan mencoba pakai <script#kmlData>.
+const KML_FILES = [
+  'data1.kml',
+  'data2.kml'
+];
+
+const map = L.map('map').setView([-7.63, 112.88], 13);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 20, attribution: '&copy; OpenStreetMap' }).addTo(map);
 
-    let placemarks = [];          // GeoJSON Point features
-    let lineCoords = [];          // [[lat,lng], ...] from the first LineString found
-    let polyline = null;          // Leaflet polyline layer
-    let faultMarker = null;       // Leaflet marker layer
+    // ===== State =====
+    let points = [];            // [{name, lat, lng}]
+    let lineCoords = [];        // semua LineString digabung
+    let subLine = [];
 
+    // Layers
+    let layerMainLine = null;
+    let layerAB = null;
+    let markerA = null, markerB = null, markerFault = null;
+
+    // UI
     const selA = document.getElementById('pointA');
-    const btnLocate = document.getElementById('btnLocate');
+    const selB = document.getElementById('pointB');
     const inputDist = document.getElementById('faultDistance');
+    const btnLocate = document.getElementById('btnLocate');
+    const btnFit = document.getElementById('btnFit');
+    const statsBox = document.getElementById('statsBox');
+    const lenAB = document.getElementById('lenAB');
+    const lenFault = document.getElementById('lenFault');
 
     btnLocate.addEventListener('click', locateFault);
+    btnFit.addEventListener('click', () => { if (layerAB) map.fitBounds(layerAB.getBounds(), { padding: [30,30] }); });
+    selA.addEventListener('change', drawAB);
+    selB.addEventListener('change', drawAB);
 
-    // Try embedded KML first; if empty, try fetch('data.kml') relative to this page.
-    (async function bootstrap() {
-      const kmlTag = document.getElementById('kmlData');
-      const raw = kmlTag && kmlTag.textContent.trim();
-      if (raw && raw.length > 0) {
-        loadKmlFromString(raw);
-      } else {
-        try {
-          const res = await fetch('data.kml', { cache: 'no-store' });
-          if (!res.ok) throw new Error('data.kml not found');
-          const text = await res.text();
-          loadKmlFromString(text);
-        } catch (e) {
-          console.warn('KML tidak ditemukan. Sematkan di <script#kmlData> atau tambahkan data.kml di repo.', e);
+    // ===== Bootstrap: load multiple KML =====
+    (async function bootstrap(){
+  const embeddedRaw = (document.getElementById('kmlData')?.textContent || '').trim();
+
+  // 1) Prioritas: embedded KML di <script#kmlData>
+  if (embeddedRaw) {
+    loadKmlAppend(embeddedRaw, 0);
+    finalizeAfterLoad();
+    return;
+  }
+
+  // 2) Coba baca daftar file dari kml_list.json (opsi tanpa ganti string di HTML)
+  try {
+    const resList = await fetch('kml_list.json', { cache: 'no-store' });
+    if (resList.ok) {
+      const list = await resList.json();
+      if (Array.isArray(list) && list.length) {
+        let loaded = 0;
+        for (let i = 0; i < list.length; i++) {
+          const f = String(list[i]);
+          try {
+            const r = await fetch(f, { cache: 'no-store' });
+            if (!r.ok) throw new Error('HTTP '+r.status);
+            const t = await r.text();
+            loadKmlAppend(t, i);
+            loaded++;
+          } catch (e) { console.warn('Gagal baca', f, e); }
         }
+        if (loaded > 0) { finalizeAfterLoad(); return; }
       }
-    })();
+    }
+  } catch (e) {
+    console.warn('kml_list.json tidak tersedia / gagal diproses', e);
+  }
 
-    function loadKmlFromString(kmlText) {
-      const parser = new DOMParser();
-      const kml = parser.parseFromString(kmlText, 'text/xml');
-      const geojson = toGeoJSON.kml(kml);
+  // 3) Fallback: daftar manual KML_FILES (kalau diset di atas)
+  const files = Array.isArray(KML_FILES) ? KML_FILES : [];
+  if (files.length) {
+    let loaded = 0;
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      try {
+        const res = await fetch(f, { cache: 'no-store' });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const text = await res.text();
+        loadKmlAppend(text, i);
+        loaded++;
+      } catch (e) { console.warn('Gagal baca', f, e); }
+    }
+    if (loaded > 0) { finalizeAfterLoad(); return; }
+  }
 
-      // Reset layers/selections if reloaded
-      placemarks = []; lineCoords = []; if (polyline) { map.removeLayer(polyline); } if (faultMarker) { map.removeLayer(faultMarker); }
-      selA.innerHTML = '';
+  // 4) Fallback terakhir: coba data.kml
+  try {
+    const res = await fetch('data.kml', { cache: 'no-store' });
+    if (res.ok) {
+      const text = await res.text();
+      loadKmlAppend(text, 0);
+      finalizeAfterLoad();
+      return;
+    }
+  } catch {}
 
-      geojson.features.forEach((f) => {
-        if (f.geometry.type === 'Point') {
-          placemarks.push(f);
-          const lat = f.geometry.coordinates[1];
-          const lng = f.geometry.coordinates[0];
-          L.marker([lat, lng]).addTo(map).bindPopup(f.properties.name || 'Point');
-          const opt = document.createElement('option');
-          opt.value = `${lat},${lng}`; // store coords to avoid name collisions
-          opt.text = f.properties.name || `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
-          selA.appendChild(opt);
-        } else if (f.geometry.type === 'LineString' && lineCoords.length === 0) {
-          // pakai LineString pertama yang ditemukan; tambah logika kalau butuh multi-line
-          lineCoords = f.geometry.coordinates.map((c) => [c[1], c[0]]);
+  console.warn('Tidak ada sumber KML: embed kosong, kml_list.json tidak ada/invalid, KML_FILES kosong, dan data.kml tidak ditemukan.');
+})();
+
+    function loadKmlAppend(kmlText, index){
+  const parser = new DOMParser();
+  const kml = parser.parseFromString(kmlText, 'text/xml');
+  const geojson = toGeoJSON.kml(kml);
+
+  // kumpulkan point & gabungkan LineString (urut sesuai KML_FILES)
+  geojson.features.forEach(f => {
+    if (f.geometry.type === 'Point') {
+      const lat = f.geometry.coordinates[1];
+      const lng = f.geometry.coordinates[0];
+      const name = f.properties.name || `${lat.toFixed(5)},${lng.toFixed(5)}`;
+      points.push({ name, lat, lng });
+      L.marker([lat,lng]).addTo(map).bindPopup(name);
+    }
+    if (f.geometry.type === 'LineString') {
+      const coords = f.geometry.coordinates.map(c => [c[1], c[0]]);
+      // Catatan: kita concatenation berurutan sesuai file; pastikan file diurutkan sesuai trase.
+      lineCoords = lineCoords.concat(coords);
+    }
+  });
+}
+
+function finalizeAfterLoad(){
+  // isi dropdown
+  selA.innerHTML=''; selB.innerHTML='';
+  points.forEach(p => {
+    const optA = document.createElement('option'); optA.value = `${p.lat},${p.lng}`; optA.text = p.name; selA.appendChild(optA);
+    const optB = document.createElement('option'); optB.value = `${p.lat},${p.lng}`; optB.text = p.name; selB.appendChild(optB);
+  });
+
+  if (lineCoords.length) {
+    if (layerMainLine) map.removeLayer(layerMainLine);
+    layerMainLine = L.polyline(lineCoords, { color: 'blue', weight: 4 }).addTo(map);
+    map.fitBounds(layerMainLine.getBounds(), { padding: [30,30] });
+  }
+
+  if (selA.options.length) selA.selectedIndex = 0;
+  if (selB.options.length) selB.selectedIndex = Math.max(0, selB.options.length - 1);
+  drawAB();
+},${lng.toFixed(5)}`, lat, lng });
+          L.marker([lat,lng]).addTo(map).bindPopup(f.properties.name || 'Point');
+          const optA = document.createElement('option'); optA.value = `${lat},${lng}`; optA.text = f.properties.name || `${lat.toFixed(5)}, ${lng.toFixed(5)}`; selA.appendChild(optA);
+          const optB = document.createElement('option'); optB.value = `${lat},${lng}`; optB.text = f.properties.name || `${lat.toFixed(5)}, ${lng.toFixed(5)}`; selB.appendChild(optB);
+        }
+        if (f.geometry.type === 'LineString') {
+          const coords = f.geometry.coordinates.map(c => [c[1], c[0]]);
+          lineCoords = lineCoords.concat(coords);
         }
       });
-
-      if (lineCoords.length) {
-        polyline = L.polyline(lineCoords, { color: 'blue', weight: 4 }).addTo(map);
-        map.fitBounds(polyline.getBounds(), { padding: [30, 30] });
-      }
-
-      // Auto-select first A if exists
-      if (selA.options.length > 0) selA.selectedIndex = 0;
     }
 
-    function locateFault() {
-      if (!lineCoords.length) { alert('Belum ada LineString di KML.'); return; }
+    function drawAB(){
+      if (!lineCoords.length || !selA.value || !selB.value) return;
+      const [alat, alng] = selA.value.split(',').map(Number);
+      const [blat, blng] = selB.value.split(',').map(Number);
+      const idxA = closestVertexIndex([alat, alng], lineCoords);
+      const idxB = closestVertexIndex([blat, blng], lineCoords);
+      subLine = sliceLine(lineCoords, idxA, idxB);
+      if (!subLine.length) return;
 
+      if (markerA) map.removeLayer(markerA);
+      if (markerB) map.removeLayer(markerB);
+      markerA = L.marker(subLine[0], { title: 'A' }).addTo(map).bindPopup('Titik A');
+      markerB = L.marker(subLine[subLine.length-1], { title: 'B' }).addTo(map).bindPopup('Titik B');
+
+      if (layerAB) map.removeLayer(layerAB);
+      layerAB = L.polyline(subLine, { color: 'orange', weight: 6, opacity: 0.9 }).addTo(map);
+
+      const total = lineLength(subLine);
+      statsBox.hidden = false;
+      lenAB.textContent = Math.round(total);
+      if (markerFault) { map.removeLayer(markerFault); markerFault = null; }
+    }
+
+    function locateFault(){
+      if (!subLine.length) { alert('Pilih A dan B dulu.'); return; }
       const faultDist = parseFloat(inputDist.value);
-      if (isNaN(faultDist) || faultDist < 0) { alert('Masukkan jarak putus yang valid (meter).'); return; }
-
-      // Tentukan titik start: paling dekat ke Titik A jika dipilih; kalau tidak, pakai indeks 0.
-      let startIdx = 0;
-      const valA = selA.value;
-      if (valA) {
-        const [alat, alng] = valA.split(',').map(Number);
-        startIdx = closestIndexOnLine([alat, alng], lineCoords);
-      }
-
-      // Hitung sepanjang polyline mulai dari startIdx ke depan
-      let cumDist = 0;
-      for (let i = startIdx + 1; i < lineCoords.length; i++) {
-        const p1 = L.latLng(lineCoords[i - 1]);
-        const p2 = L.latLng(lineCoords[i]);
-        const segDist = p1.distanceTo(p2);
-        if (cumDist + segDist >= faultDist) {
-          const ratio = (faultDist - cumDist) / segDist;
-          const lat = p1.lat + (p2.lat - p1.lat) * ratio;
-          const lng = p1.lng + (p2.lng - p1.lng) * ratio;
-          if (faultMarker) map.removeLayer(faultMarker);
-          faultMarker = L.marker([lat, lng], { title: 'Titik Putus' })
-            .addTo(map)
-            .bindPopup(`Titik putus di sini (<b>${lat.toFixed(5)}, ${lng.toFixed(5)}</b>)`).openPopup();
-          map.panTo([lat, lng]);
+      if (isNaN(faultDist) || faultDist < 0) { alert('Masukkan jarak putus valid (meter).'); return; }
+      const total = lineLength(subLine);
+      lenFault.textContent = Math.round(faultDist);
+      if (faultDist > total) { alert('Jarak melebihi panjang jalur A→B.'); return; }
+      let cum = 0;
+      for (let i = 1; i < subLine.length; i++) {
+        const p1 = L.latLng(subLine[i-1]);
+        const p2 = L.latLng(subLine[i]);
+        const seg = p1.distanceTo(p2);
+        if (cum + seg >= faultDist) {
+          const t = (faultDist - cum) / seg;
+          const lat = p1.lat + (p2.lat - p1.lat) * t;
+          const lng = p1.lng + (p2.lng - p1.lng) * t;
+          if (markerFault) map.removeLayer(markerFault);
+          markerFault = L.marker([lat,lng], { title: 'Titik Putus' })
+            .addTo(map).bindPopup(`Titik putus (<b>${lat.toFixed(5)}, ${lng.toFixed(5)}</b>)`).openPopup();
+          map.panTo([lat,lng]);
           return;
         }
-        cumDist += segDist;
+        cum += seg;
       }
-
-      alert('Jarak melebihi panjang jalur dari titik A yang dipilih.');
     }
 
-    function closestIndexOnLine(point, line) {
-      // cari indeks vertex paling dekat dengan titik (pendekatan cepat)
-      let bestIdx = 0; let bestD = Infinity;
-      for (let i = 0; i < line.length; i++) {
-        const d = L.latLng(line[i]).distanceTo(L.latLng(point[0], point[1]));
-        if (d < bestD) { bestD = d; bestIdx = i; }
+    // Helpers
+    function closestVertexIndex(pt, line){
+      let best = 0, bestD = Infinity;
+      for (let i=0;i<line.length;i++){
+        const d = L.latLng(line[i]).distanceTo(L.latLng(pt[0], pt[1]));
+        if (d < bestD) { bestD = d; best = i; }
       }
-      return bestIdx;
+      return best;
+    }
+    function sliceLine(line, iA, iB){
+      if (iA === iB) return [ line[iA] ];
+      if (iA < iB) return line.slice(iA, iB+1);
+      return line.slice(iB, iA+1).reverse();
+    }
+    function lineLength(line){
+      let sum = 0; for (let i=1;i<line.length;i++) sum += L.latLng(line[i-1]).distanceTo(L.latLng(line[i]));
+      return sum;
     }
   </script>
 </body>
 </html>
+

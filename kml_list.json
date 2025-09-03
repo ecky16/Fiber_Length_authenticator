@@ -1,4 +1,3 @@
 const KML_FILES = [
   "ODP_20250702.kml",
-  "ODC_20250714.kml"
 ];

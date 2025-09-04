@@ -3,425 +3,209 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Peta KML – Versi Lengkap + Pengukuran (Leaflet + toGeoJSON)</title>
+  <title>Peta KML – Versi Lengkap + OTDR (ODC→ODP) + Layer Toggle + Ukur Titik</title>
 
   <!-- Leaflet CSS -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
-  <!-- Leaflet.Measure CSS (untuk fitur pengukuran jarak & luas) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet-measure@3.3.0/dist/leaflet-measure.css" />
 
   <style>
-    :root { --h: 72px; }
-    body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial; }
-    header { position: sticky; top: 0; z-index: 1000; display: flex; gap: .75rem; align-items: center; padding: .75rem 1rem; background: #111827; color: #e5e7eb; box-shadow: 0 2px 10px rgba(0,0,0,.15); }
-    header h1 { font-size: 1rem; margin: 0; font-weight: 600; letter-spacing: .2px; }
-    .wrap { display: grid; grid-template-columns: 320px 1fr; height: calc(100vh - var(--h)); }
-    .sidebar { border-right: 1px solid #e5e7eb; padding: .75rem; overflow: auto; }
-    .group { margin-bottom: .75rem; }
-    .group label { font-size: .85rem; font-weight: 600; color: #111827; display: block; margin-bottom: .25rem; }
-    select, input[type="text"], button { width: 100%; padding: .6rem .7rem; border: 1px solid #d1d5db; border-radius: .5rem; font-size: .9rem; }
-    button { background:#111827; color:#fff; cursor:pointer; }
-    button:disabled { opacity:.6; cursor:not-allowed; }
-    #map { width: 100%; height: calc(100vh - var(--h)); }
-    details { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: .5rem; padding: .4rem .6rem; }
-    .log { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: .8rem; white-space: pre-wrap; max-height: 260px; overflow: auto; }
-    .badge { display:inline-block; padding: .1rem .45rem; border-radius: .4rem; background:#eef2ff; color:#3730a3; font-size:.7rem; }
-    .row { display:grid; grid-template-columns: 1fr auto; gap:.5rem; align-items: center; }
+    body { margin: 0; font-family: sans-serif; }
+    header { background: #111827; color: #fff; padding: .5rem 1rem; font-size: 1rem; font-weight: bold; }
+    .wrap { display: grid; grid-template-columns: 320px 1fr; height: calc(100vh - 40px); }
+    .sidebar { border-right: 1px solid #ccc; padding: .5rem; overflow: auto; }
+    #map { width: 100%; height: 100%; }
+    .group { margin-bottom: .9rem; }
+    .group label { display:block; font-size:.85rem; margin-bottom:.25rem; font-weight:600; }
+    select, input, button { width: 100%; padding: .5rem; margin-bottom: .25rem; }
+    button { background:#111827; color:#fff; border:none; cursor:pointer; }
+    .row { display:grid; grid-template-columns: 1fr 1fr; gap:.5rem; }
+    .log { font-family: monospace; font-size:.8rem; white-space: pre-wrap; max-height:220px; overflow:auto; border:1px solid #ddd; padding:.25rem; }
     .muted { color:#6b7280; font-size:.8rem; }
-    .flex { display:flex; gap:.5rem; }
-    .hint { font-size:.8rem; color:#374151; }
   </style>
-  <!-- Turf.js untuk perhitungan geospasial (jarak sepanjang jalur, snapping, dll.) -->
-  <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
 </head>
 <body>
-  <header>
-    <h1>Peta KML – Leaflet + toGeoJSON (multi-sumber) + Pengukuran</h1>
-    <span class="badge" title="Memuat KML dari query ?kml=, kml_list.json, atau variabel KML_FILES">v1.2</span>
-  </header>
-
+  <header>Peta KML – Leaflet + OTDR (ODC→ODP)</header>
   <div class="wrap">
     <aside class="sidebar">
       <div class="group">
-        <label for="kmlSelect">Pilih layer KML</label>
-        <div class="row">
-          <select id="kmlSelect" multiple size="6" title="Pilih satu atau lebih file KML untuk dimuat"></select>
-          <div class="flex" style="flex-direction: column;">
-            <button id="btnLoadSelected" title="Muat pilihan di daftar">Muat</button>
-            <button id="btnClear" title="Hapus semua layer terpasang" style="background:#6b7280;">Bersihkan</button>
-          </div>
-        </div>
-        <div class="hint">Tips: Bisa pakai URL param <code>?kml=ODC_20250702.kml,ODP_20250702.kml</code></div>
+        <label for="kmlFiles">Muat file KML (bisa pilih lebih dari satu)</label>
+        <input type="file" id="kmlFiles" accept=".kml" multiple />
+        <div class="muted">Setiap file akan jadi layer terpisah yang bisa di-ON/OFF.</div>
       </div>
 
       <div class="group">
-        <label for="kmlUrl">Muat dari URL</label>
-        <div class="row">
-          <input type="text" id="kmlUrl" placeholder="https://contoh.com/ODC_20250702.kml" />
-          <button id="btnLoadUrl">Go</button>
-        </div>
+        <label for="routeSelect">Pilih Rute (ODC → ODP) untuk OTDR</label>
+        <select id="routeSelect"></select>
+        <label for="otdrMeter">Jarak OTDR (meter)</label>
+        <input type="number" id="otdrMeter" placeholder="Misal 1240" />
+        <button id="btnFindBreak">Temukan Titik Putus</button>
       </div>
 
       <div class="group">
-        <label>Temukan Titik Putus (berdasarkan hasil OTDR)</label>
+        <label>Ukur dari Titik Bernama ke Titik Bernama</label>
         <div class="row">
-          <select id="routeSelect" title="Pilih rute/segmen serat dari KML"></select>
+          <select id="ptFrom"></select>
+          <select id="ptTo"></select>
         </div>
-        <div class="row" style="margin-top:.4rem">
-          <input type="number" id="otdrMeter" placeholder="Jarak OTDR (meter)" min="0" step="1" />
-          <button id="btnFindBreak" title="Plot titik di sepanjang rute berdasarkan jarak OTDR">Temukan</button>
-        </div>
-        <div class="hint" id="routeInfo"></div>
-      </div>
-
-      <div class="group">
-        <label for="kmlFile">Muat dari file lokal (.kml)</label>
-        <input type="file" id="kmlFile" accept=".kml" />
+        <input type="number" id="breakNote" placeholder="Keterangan putus (meter) — opsional" />
+        <button id="btnMeasure">Ukur & Tandai</button>
+        <div class="muted">Jarak garis lurus (geodesik). Untuk jarak sepanjang jalur, gunakan fitur OTDR di atas.</div>
       </div>
 
       <div class="group">
         <label>Status & Log</label>
-        <details open>
-          <summary class="muted">Klik untuk sembunyikan/tampilkan</summary>
-          <div id="log" class="log"></div>
-        </details>
-      </div>
-
-      <div class="group">
-        <label>Catatan</label>
-        <div class="hint">
-          Urutan prioritas sumber KML:
-          <ol>
-            <li>Query string <code>?kml=</code> (bisa multi, pisahkan koma)</li>
-            <li>File <code>kml_list.json</code> (opsional)</li>
-            <li>Variabel global <code>window.KML_FILES</code> (opsional)</li>
-          </ol>
-        </div>
+        <div id="log" class="log"></div>
       </div>
     </aside>
-
     <main>
       <div id="map"></div>
     </main>
   </div>
 
   <!-- Leaflet JS -->
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-  <!-- toGeoJSON: wajib agar toGeoJSON.kml tersedia -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/togeojson/0.16.0/togeojson.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-  <!-- Leaflet.Measure JS: tool pengukuran -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/togeojson/0.16.0/togeojson.min.js"></script>
   <script src="https://unpkg.com/leaflet-measure@3.3.0/dist/leaflet-measure.js"></script>
+  <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
 
   <script>
-    // ================== KONFIG OPSIONAL ==================
-    // window.KML_FILES = [
-    //   { label: 'ODC_20250702.kml', url: 'ODC_20250702.kml' },
-    //   { label: 'ODP_20250702.kml', url: 'ODP_20250702.kml' }
-    // ];
-    // =====================================================
-
-    // UI helpers
-    const $ = (sel) => document.querySelector(sel);
-    const logEl = $('#log');
-    function log(msg, type = 'info') {
-      const time = new Date().toLocaleTimeString();
-      const line = `[${time}] ${type.toUpperCase()}: ${msg}\n`;
-      logEl.textContent += line;
-      logEl.scrollTop = logEl.scrollHeight;
-      console[type === 'error' ? 'error' : 'log'](msg);
-    }
-
-    // Init Leaflet map
+    // ====== peta ======
     const map = L.map('map').setView([-7.6, 112.9], 12);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 20,
-      attribution: '&copy; OpenStreetMap contributors'
-    }).addTo(map);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 20, attribution: '&copy; OpenStreetMap contributors' }).addTo(map);
+    L.control.measure().addTo(map);
 
-    // Layer control
-    const baseLayers = {};
-    const overlayLayers = {}; // nama -> layerGroup
-    const layerControl = L.control.layers(baseLayers, overlayLayers, { collapsed: false }).addTo(map);
-
-    // === Pengukuran Jarak & Luas ===
-    // Tombol pengukuran (ikon penggaris) di pojok kiri atas
-    const measureControl = new L.Control.Measure({
-      position: 'topleft',
-      primaryLengthUnit: 'meters',
-      secondaryLengthUnit: 'kilometers',
-      primaryAreaUnit: 'sqmeters',
-      secondaryAreaUnit: 'hectares',
-      activeColor: '#ef4444',
-      completedColor: '#10b981'
-    });
-    measureControl.addTo(map);
-
-    // Log koordinat saat klik peta (membantu ukur manual / catat titik)
-    map.on('click', (e) => {
-      const { lat, lng } = e.latlng;
-      log(`Klik: lat ${lat.toFixed(6)}, lng ${lng.toFixed(6)}`);
-    });
-
-    // ====== Fitur OTDR: daftar rute & util ======
-    const routes = []; // {id, name, line(Turf feature Line/MultiLine), lenKm}
+    // ====== state ======
+    const routes = [];           // {id, line, lenKm, startName, endName}
+    const allPoints = [];        // {name, lat, lng}
+    const overlayLayers = {};    // {filename: L.LayerGroup}
     let breakMarker = null;
+    let measureLine = null;
 
-    function renderRouteSelect() {
+    // ====== log util ======
+    const logEl = document.getElementById('log');
+    const log = (msg) => { logEl.textContent += msg + "\n"; logEl.scrollTop = logEl.scrollHeight; };
+
+    // ====== layer control ======
+    const layerControl = L.control.layers({}, {}, {collapsed:false}).addTo(map);
+
+    function upsertLayerGroup(name){
+      if(!overlayLayers[name]){
+        overlayLayers[name] = L.layerGroup().addTo(map);
+        layerControl.addOverlay(overlayLayers[name], name);
+      }
+      return overlayLayers[name];
+    }
+
+    // ====== render dropdowns ======
+    function renderRouteSelect(){
       const sel = document.getElementById('routeSelect');
-      if (!sel) return;
-      const cur = sel.value;
       sel.innerHTML = '';
-      routes.forEach(r => {
+      routes.forEach(r=>{
         const opt = document.createElement('option');
-        opt.value = r.id; opt.textContent = `${r.name} — ${(r.lenKm*1000).toFixed(0)} m`;
-        sel.appendChild(opt);
-      });
-      if (cur) sel.value = cur;
-      const info = document.getElementById('routeInfo');
-      if (info && sel.value) {
-        const r = routes.find(x => x.id === sel.value);
-        if (r) info.textContent = `Panjang rute: ${(r.lenKm*1000).toFixed(0)} m`;
-      }
-    }
-
-    function alongOnAny(lineFeature, km) {
-      const g = lineFeature.geometry || lineFeature;
-      if (g.type === 'LineString') {
-        return turf.along(lineFeature, km, { units: 'kilometers' });
-      }
-      // MultiLineString → flatten jadi beberapa LineString dan cari segmen yang memuat jarak kumulatif
-      const fc = turf.flatten(lineFeature);
-      let acc = 0;
-      for (const f of fc.features) {
-        const segLen = turf.length(f, { units: 'kilometers' });
-        if (km <= acc + segLen) {
-          const kmOnSeg = km - acc;
-          return turf.along(f, kmOnSeg, { units: 'kilometers' });
-        }
-        acc += segLen;
-      }
-      // Jika melebihi panjang total, kembalikan titik akhir segmen terakhir
-      const last = fc.features[fc.features.length - 1];
-      const coords = last.geometry.coordinates;
-      const end = coords[coords.length - 1];
-      return turf.point(end);
-    }
-
-    function placeBreakMarker(pt, label) {
-      const [lng, lat] = pt.geometry.coordinates;
-      if (breakMarker) { map.removeLayer(breakMarker); breakMarker = null; }
-      breakMarker = L.marker([lat, lng]).addTo(map).bindPopup(label || 'Titik putus').openPopup();
-      map.flyTo([lat, lng], 17);
-    }
-
-    // Helpers
-    function getParam(name) {name) {
-      const url = new URL(window.location.href);
-      return url.searchParams.get(name);
-    }
-
-    function normalizeList(input) {
-      // Menerima array of string atau array of {label,url}
-      return input.map(item => {
-        if (typeof item === 'string') return { label: item.split('/').pop(), url: item };
-        if (item && typeof item === 'object') return { label: item.label || (item.url ? item.url.split('/').pop() : 'KML'), url: item.url };
-        return null;
-      }).filter(Boolean);
-    }
-
-    async function tryFetchJson(url) {
-      try {
-        const res = await fetch(url, { cache: 'no-store' });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return await res.json();
-      } catch (e) {
-        log(`Gagal baca ${url}: ${e.message}`, 'error');
-        return null;
-      }
-    }
-
-    async function detectSources() {
-      // 1) Query ?kml=
-      const qp = getParam('kml');
-      if (qp) {
-        const arr = qp.split(',').map(s => s.trim()).filter(Boolean);
-        if (arr.length) {
-          log(`Sumber: query param kml (${arr.length} file)`);
-          return normalizeList(arr);
-        }
-      }
-
-      // 2) kml_list.json (opsional)
-      const j = await tryFetchJson('kml_list.json');
-      if (j && Array.isArray(j) && j.length) {
-        log(`Sumber: kml_list.json (${j.length} file)`);
-        return normalizeList(j);
-      }
-
-      // 3) window.KML_FILES (opsional)
-      if (Array.isArray(window.KML_FILES) && window.KML_FILES.length) {
-        log(`Sumber: window.KML_FILES (${window.KML_FILES.length} file)`);
-        return normalizeList(window.KML_FILES);
-      }
-
-      log('Tidak ada sumber KML: query param kosong, kml_list.json tidak ditemukan/kosong, dan KML_FILES tidak ada.', 'error');
-      return [];
-    }
-
-    function addGeoJSONToMap(geojson, name) {
-      const layer = L.geoJSON(geojson, {
-        style: feature => ({ color: '#ef4444', weight: 2 }),
-        pointToLayer: (feature, latlng) => L.circleMarker(latlng, { radius: 6 }),
-        onEachFeature: (feature, lyr) => {
-          const p = feature.properties || {};
-          const title = p.name || p.Name || p.title || 'Fitur';
-          const desc = p.description || p.Description || '';
-          const html = `<strong>${title}</strong>${desc ? `<div style=\"margin-top:.25rem\">${desc}</div>` : ''}`;
-          lyr.bindPopup(html);
-        }
-      });
-
-      // Kumpulkan rute LineString/MultiLineString untuk fitur OTDR
-      try {
-        const feats = Array.isArray(geojson.features) ? geojson.features : [];
-        feats.forEach((f, idx) => {
-          if (!f || !f.geometry) return;
-          const g = f.geometry;
-          if (g.type === 'LineString' || g.type === 'MultiLineString') {
-            const p = f.properties || {};
-            const rName = (p.name || p.Name || p.title || name || 'Rute') + ` #${idx+1}`;
-            // Bentuk feature Turf
-            const line = g.type === 'LineString' ? turf.lineString(g.coordinates) : turf.multiLineString(g.coordinates);
-            const lenKm = turf.length(line, { units: 'kilometers' });
-            routes.push({ id: `${rName}-${Date.now()}-${idx}`, name: rName, line, lenKm });
-          }
-        });
-        renderRouteSelect();
-      } catch (e) { log(`Gagal memproses rute: ${e.message}`, 'error'); }
-
-      // Simpan sebagai overlay agar bisa dihidup-matikan
-      const group = L.layerGroup([layer]).addTo(map);
-      overlayLayers[name] = group;
-      layerControl.addOverlay(group, name);
-
-      // Fit bounds aman
-      try {
-        const b = layer.getBounds();
-        if (b.isValid()) map.fitBounds(b.pad(0.2));
-      } catch (_) {}
-
-      return group;
-    }
-
-    async function loadKmlUrl(url, displayName) {
-      const name = displayName || (url ? url.split('/').pop() : 'KML');
-      log(`Load: ${name} → ${url}`);
-      try {
-        const res = await fetch(url, { cache: 'no-store' });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const text = await res.text();
-        // Parse KML ke DOM, lalu ke GeoJSON
-        const parser = new DOMParser();
-        const kml = parser.parseFromString(text, 'text/xml');
-        const geojson = toGeoJSON.kml(kml); // penting: butuh toGeoJSON
-        addGeoJSONToMap(geojson, name);
-        log(`LOAD OK: ${name} (len ${text.length})`);
-      } catch (e) {
-        log(`Gagal load: ${name} → ${e.message}`, 'error');
-      }
-    }
-
-    async function populateSelect(list) {
-      const sel = $('#kmlSelect');
-      sel.innerHTML = '';
-      list.forEach(({ label, url }) => {
-        const opt = document.createElement('option');
-        opt.value = url; opt.textContent = label || url.split('/').pop();
+        opt.value = r.id;
+        opt.textContent = `${r.startName} → ${r.endName} (${(r.lenKm*1000).toFixed(0)} m)`;
         sel.appendChild(opt);
       });
     }
 
-    async function boot() {
-      // Deteksi & tampilkan daftar
-      const list = await detectSources();
-      await populateSelect(list);
-
-      // Jika sumber berasal dari query param, langsung muat semuanya
-      if (getParam('kml')) {
-        for (const item of list) await loadKmlUrl(item.url, item.label);
-      }
+    function renderPointSelects(){
+      const fromSel = document.getElementById('ptFrom');
+      const toSel = document.getElementById('ptTo');
+      const names = Array.from(new Set(allPoints.map(p=>p.name))).sort();
+      fromSel.innerHTML = ''; toSel.innerHTML='';
+      names.forEach(n=>{
+        const o1=document.createElement('option'); o1.value=n; o1.textContent=n; fromSel.appendChild(o1);
+        const o2=document.createElement('option'); o2.value=n; o2.textContent=n; toSel.appendChild(o2);
+      });
     }
 
-    // Event handlers
+    // ====== helper nearest point name (untuk ujung rute) ======
+    function findNearestPointName(coord, radiusMeters = 250){
+      const target = turf.point(coord);
+      let best=null, min=Infinity;
+      allPoints.forEach(p=>{
+        const d=turf.distance(target, turf.point([p.lng,p.lat]), {units:'meters'});
+        if(d<min && d<=radiusMeters){ min=d; best=p.name; }
+      });
+      return best || null;
+    }
+
+    // ====== aksi UI ======
     document.getElementById('btnFindBreak').addEventListener('click', () => {
       const sel = document.getElementById('routeSelect');
-      const input = document.getElementById('otdrMeter');
-      if (!sel.value) { log('Pilih rute terlebih dahulu', 'error'); return; }
       const r = routes.find(x => x.id === sel.value);
-      if (!r) { log('Rute tidak ditemukan', 'error'); return; }
-      const meters = Number(input.value || 0);
-      if (!(meters >= 0)) { log('Masukkan jarak OTDR yang valid (meter)', 'error'); return; }
-      const totalMeters = r.lenKm * 1000;
-      if (meters > totalMeters) log(`Peringatan: jarak OTDR (${meters} m) melebihi panjang rute (${totalMeters.toFixed(0)} m) — akan dipotong ke titik akhir.`, 'info');
-      const km = Math.max(0, Math.min(meters / 1000, r.lenKm));
-      const pt = alongOnAny(r.line, km);
-      placeBreakMarker(pt, `Titik putus ≈ ${meters.toFixed(0)} m pada rute: ${r.name}`);
-      log(`Titik putus diplot di ${meters.toFixed(0)} m (rute: ${r.name})`);
+      if (!r) { log('Rute tidak dipilih'); return; }
+      const m = Number(document.getElementById('otdrMeter').value);
+      if (!(m>=0)) { log('Masukkan jarak OTDR valid'); return; }
+      const km = Math.min(m/1000, r.lenKm);
+      const pt = turf.along(r.line, km, {units:'kilometers'});
+      const [lng,lat] = pt.geometry.coordinates;
+      if (breakMarker) map.removeLayer(breakMarker);
+      breakMarker = L.marker([lat,lng]).addTo(map).bindPopup(`Titik putus ${m} m pada ${r.startName} → ${r.endName}`).openPopup();
+      map.flyTo([lat,lng], 17);
+      log(`Titik putus ditandai: ${m} m pada rute ${r.startName} → ${r.endName}`);
     });
 
-    document.getElementById('btnLoadSelected').addEventListener('click', async () => {.addEventListener('click', async () => {
-      const sel = document.getElementById('kmlSelect');
-      const chosen = [...sel.selectedOptions].map(o => ({ label: o.textContent, url: o.value }));
-      if (!chosen.length) { log('Pilih minimal satu KML di daftar', 'error'); return; }
-      for (const item of chosen) await loadKmlUrl(item.url, item.label);
+    document.getElementById('btnMeasure').addEventListener('click', () => {
+      const fromName = document.getElementById('ptFrom').value;
+      const toName = document.getElementById('ptTo').value;
+      const note = document.getElementById('breakNote').value;
+      const p1 = allPoints.find(p=>p.name===fromName);
+      const p2 = allPoints.find(p=>p.name===toName);
+      if(!p1 || !p2){ log('Titik tidak lengkap'); return; }
+      const line = turf.lineString([[p1.lng,p1.lat],[p2.lng,p2.lat]]);
+      const meters = turf.length(line,{units:'kilometers'})*1000;
+      if (measureLine) map.removeLayer(measureLine);
+      measureLine = L.polyline([[p1.lat,p1.lng],[p2.lat,p2.lng]], {color:'#2563eb'}).addTo(map);
+      const mid = turf.midpoint(turf.point([p1.lng,p1.lat]), turf.point([p2.lng,p2.lat]));
+      const [mlng, mlat] = mid.geometry.coordinates;
+      L.marker([mlat, mlng]).addTo(map).bindPopup(`ODP/ODC: ${fromName} → ${toName}<br>Jarak ≈ ${meters.toFixed(0)} m${note?`<br>Putus: ${Number(note).toFixed(0)} m`:''}`).openPopup();
+      map.fitBounds(measureLine.getBounds().pad(0.2));
+      log(`Ukur: ${fromName} → ${toName} = ${meters.toFixed(0)} m${note?` | Putus ${Number(note).toFixed(0)} m`:''}`);
     });
 
-    document.getElementById('btnLoadUrl').addEventListener('click', async () => {
-      const url = document.getElementById('kmlUrl').value.trim();
-      if (!url) { log('URL kosong', 'error'); return; }
-      await loadKmlUrl(url);
-    });
-
-    document.getElementById('btnClear').addEventListener('click', () => {
-      Object.entries(overlayLayers).forEach(([name, group]) => {
-        try { map.removeLayer(group); layerControl.removeLayer(group); } catch(_) {}
-        delete overlayLayers[name];
-      });
-      log('Semua layer dibersihkan');
-    });
-
-    document.getElementById('kmlFile').addEventListener('change', async (ev) => {
-      const file = ev.target.files?.[0];
-      if (!file) return;
-      if (!file.name.toLowerCase().endsWith('.kml')) { log('File harus .kml', 'error'); return; }
-      const name = file.name;
-      try {
+    // ====== load banyak KML ======
+    document.getElementById('kmlFiles').addEventListener('change', async (ev) => {
+      const files = ev.target.files;
+      for (const file of files) {
         const text = await file.text();
         const kml = new DOMParser().parseFromString(text, 'text/xml');
         const geojson = toGeoJSON.kml(kml);
-        addGeoJSONToMap(geojson, name);
-        log(`LOAD OK (lokal): ${name} (len ${text.length})`);
-      } catch (e) {
-        log(`Gagal load file lokal: ${name} → ${e.message}`, 'error');
-      } finally {
-        ev.target.value = '';
+
+        const group = upsertLayerGroup(file.name);
+        const gLayer = L.geoJSON(geojson, {
+          pointToLayer: (f, latlng) => L.circleMarker(latlng, {radius:6}),
+          onEachFeature: (f, l) => {
+            if (f.geometry.type === 'Point') {
+              const nm = f.properties.name || 'Titik';
+              l.bindPopup(nm);
+              allPoints.push({ name: nm, lat: l.getLatLng().lat, lng: l.getLatLng().lng });
+            }
+          }
+        }).addTo(group);
+
+        // Deteksi rute (LineString saja untuk sederhana)
+        geojson.features.forEach((f, idx) => {
+          if (f.geometry.type === 'LineString') {
+            const coords = f.geometry.coordinates;
+            const start = coords[0];
+            const end = coords[coords.length-1];
+            const startName = findNearestPointName(start) || 'ODC';
+            const endName = findNearestPointName(end) || 'ODP';
+            const line = turf.lineString(coords);
+            const lenKm = turf.length(line, {units:'kilometers'});
+            routes.push({id:`${file.name}-r${idx}`, line, lenKm, startName, endName});
+          }
+        });
+
+        // Fit bounds kelompok layer file ini
+        try { map.fitBounds(gLayer.getBounds().pad(0.2)); } catch(_){ }
       }
+      renderRouteSelect();
+      renderPointSelects();
+      log(`${files.length} file KML dimuat, total rute: ${routes.length}, total titik: ${allPoints.length}`);
     });
-
-    // Update info rute ketika pilihan berubah
-    document.getElementById('routeSelect').addEventListener('change', () => renderRouteSelect());
-
-    // Mulai!
-    boot();
   </script>
-
-  <!--
-  ====== Contoh struktur kml_list.json ======
-  [
-    "ODC_20250702.kml",
-    { "label": "ODP_20250702 KML", "url": "ODP_20250702.kml" },
-    { "label": "STO-ABC", "url": "https://example.com/maps/sto_abc.kml" }
-  ]
-  -->
 </body>
 </html>

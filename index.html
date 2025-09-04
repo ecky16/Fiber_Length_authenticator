@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Peta KML – Versi Lengkap + OTDR (ODC→ODP) + Layer Toggle + Ukur Titik</title>
+  <title>Peta KML – Versi Lengkap + OTDR (ODC→ODP) + Sinkron Otomatis</title>
 
   <!-- Leaflet CSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -20,7 +20,7 @@
     select, input, button { width: 100%; padding: .5rem; margin-bottom: .25rem; }
     button { background:#111827; color:#fff; border:none; cursor:pointer; }
     .row { display:grid; grid-template-columns: 1fr 1fr; gap:.5rem; }
-    .log { font-family: monospace; font-size:.8rem; white-space: pre-wrap; max-height:220px; overflow:auto; border:1px solid #ddd; padding:.25rem; }
+    .log { font-family: monospace; font-size:.8rem; white-space: pre-wrap; max-height:240px; overflow:auto; border:1px solid #ddd; padding:.25rem; }
     .muted { color:#6b7280; font-size:.8rem; }
   </style>
 </head>
@@ -31,7 +31,7 @@
       <div class="group">
         <label for="kmlFiles">Muat file KML (bisa pilih lebih dari satu)</label>
         <input type="file" id="kmlFiles" accept=".kml" multiple />
-        <div class="muted">Setiap file akan jadi layer terpisah yang bisa di-ON/OFF.</div>
+        <div class="muted">Setiap file akan jadi layer terpisah yang bisa di-ON/OFF. Sinkron otomatis begitu diupload.</div>
       </div>
 
       <div class="group">
@@ -76,7 +76,7 @@
     L.control.measure().addTo(map);
 
     // ====== state ======
-    const routes = [];           // {id, line, lenKm, startName, endName}
+    const routes = [];           // {id, line(GeoJSON LineString), lenKm, startName, endName}
     const allPoints = [];        // {name, lat, lng}
     const overlayLayers = {};    // {filename: L.LayerGroup}
     let breakMarker = null;
@@ -120,8 +120,15 @@
       });
     }
 
-    // ====== helper nearest point name (untuk ujung rute) ======
-    function findNearestPointName(coord, radiusMeters = 250){
+    // ====== helper ======
+    function safeName(props){
+      // Ambil nama dari berbagai kemungkinan key
+      return props?.name || props?.Name || props?.title || props?.Title ||
+             props?.ODC || props?.ODP || null;
+    }
+
+    function findNearestPointName(coord, radiusMeters = 300){
+      // cari titik bernama terdekat dalam radius
       const target = turf.point(coord);
       let best=null, min=Infinity;
       allPoints.forEach(p=>{
@@ -129,6 +136,40 @@
         if(d<min && d<=radiusMeters){ min=d; best=p.name; }
       });
       return best || null;
+    }
+
+    function addFeaturesToIndexes(geojson, fileName){
+      const group = upsertLayerGroup(fileName);
+
+      const layer = L.geoJSON(geojson, {
+        pointToLayer: (f, latlng) => L.circleMarker(latlng, {radius:6}),
+        onEachFeature: (f, l) => {
+          const nm = safeName(f.properties);
+          if (f.geometry.type === 'Point') {
+            if (nm) allPoints.push({ name: nm, lat: l.getLatLng().lat, lng: l.getLatLng().lng });
+            l.bindPopup(nm || 'Titik');
+          }
+        }
+      }).addTo(group);
+
+      // Flatten semua LineString (termasuk MultiLineString & nested Folders)
+      const fc = (geojson.type === 'FeatureCollection') ? geojson : { type:'FeatureCollection', features:[geojson] };
+      const flattened = turf.flatten(fc); // pecah jadi LineString tunggal
+
+      flattened.features.forEach((f, idx) => {
+        if (!f.geometry || f.geometry.type !== 'LineString') return;
+        const coords = f.geometry.coordinates;
+        if (!coords || coords.length < 2) return;
+        const start = coords[0];
+        const end = coords[coords.length-1];
+        const startName = findNearestPointName(start) || (safeName(f.properties) || 'ODC');
+        const endName = findNearestPointName(end) || 'ODP';
+        const line = turf.lineString(coords);
+        const lenKm = turf.length(line, {units:'kilometers'});
+        routes.push({id:`${fileName}-r${idx}-${routes.length}`, line, lenKm, startName, endName});
+      });
+
+      try { map.fitBounds(layer.getBounds().pad(0.2)); } catch(_){ }
     }
 
     // ====== aksi UI ======
@@ -169,42 +210,19 @@
     document.getElementById('kmlFiles').addEventListener('change', async (ev) => {
       const files = ev.target.files;
       for (const file of files) {
-        const text = await file.text();
-        const kml = new DOMParser().parseFromString(text, 'text/xml');
-        const geojson = toGeoJSON.kml(kml);
-
-        const group = upsertLayerGroup(file.name);
-        const gLayer = L.geoJSON(geojson, {
-          pointToLayer: (f, latlng) => L.circleMarker(latlng, {radius:6}),
-          onEachFeature: (f, l) => {
-            if (f.geometry.type === 'Point') {
-              const nm = f.properties.name || 'Titik';
-              l.bindPopup(nm);
-              allPoints.push({ name: nm, lat: l.getLatLng().lat, lng: l.getLatLng().lng });
-            }
-          }
-        }).addTo(group);
-
-        // Deteksi rute (LineString saja untuk sederhana)
-        geojson.features.forEach((f, idx) => {
-          if (f.geometry.type === 'LineString') {
-            const coords = f.geometry.coordinates;
-            const start = coords[0];
-            const end = coords[coords.length-1];
-            const startName = findNearestPointName(start) || 'ODC';
-            const endName = findNearestPointName(end) || 'ODP';
-            const line = turf.lineString(coords);
-            const lenKm = turf.length(line, {units:'kilometers'});
-            routes.push({id:`${file.name}-r${idx}`, line, lenKm, startName, endName});
-          }
-        });
-
-        // Fit bounds kelompok layer file ini
-        try { map.fitBounds(gLayer.getBounds().pad(0.2)); } catch(_){ }
+        try {
+          const text = await file.text();
+          const kml = new DOMParser().parseFromString(text, 'text/xml');
+          const geojson = toGeoJSON.kml(kml); // support Folder/Placemark otomatis
+          addFeaturesToIndexes(geojson, file.name);
+          log(`LOAD OK: ${file.name}`);
+        } catch (e) {
+          log(`Gagal load ${file.name}: ${e.message}`);
+        }
       }
       renderRouteSelect();
       renderPointSelects();
-      log(`${files.length} file KML dimuat, total rute: ${routes.length}, total titik: ${allPoints.length}`);
+      log(`${files.length} file dimuat. Total rute: ${routes.length} | total titik: ${allPoints.length}`);
     });
   </script>
 </body>
